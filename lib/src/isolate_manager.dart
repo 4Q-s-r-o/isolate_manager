@@ -336,7 +336,7 @@ class IsolateManager<R, P> {
     bool autoStart = true,
     String subPath = '',
     int maxQueueCount = 0,
-    QueueStrategy<Object, List<Object>>? queueStrategy,
+    QueueStrategy<Object?, List<dynamic>>? queueStrategy,
     bool enableWasmConverter = true,
     bool isDebug = false,
   }) => IsolateManagerShared(
