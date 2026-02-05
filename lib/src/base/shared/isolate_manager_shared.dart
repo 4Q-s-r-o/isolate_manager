@@ -33,8 +33,6 @@ class IsolateManagerShared {
   /// Control the Queue strategy via [queueStrategy] with the following basic
   /// strategies:
   ///   - [UnlimitedStrategy] - default.
-  ///   - [DropNewestStrategy]
-  ///   - [DropOldestStrategy]
   ///   - [RejectIncomingStrategy]
   ///
   /// Set [isDebug] to `true` if you want to print the debug log.
@@ -48,6 +46,7 @@ class IsolateManagerShared {
     QueueStrategy<Object?, List<dynamic>>? queueStrategy,
     this.enableWasmConverter = true,
     bool isDebug = false,
+    void Function(dynamic)? postExecutor,
   }) : _manager = IsolateManager.create(
          internalFunction,
          workerName: useWorker ? join(subPath, kSharedWorkerName) : '',
@@ -56,6 +55,7 @@ class IsolateManagerShared {
          queueStrategy: queueStrategy,
          enableWasmConverter: false,
          isDebug: isDebug,
+         postExecutor: postExecutor,
        ) {
     if (autoStart) start();
   }
@@ -101,7 +101,7 @@ class IsolateManagerShared {
     String? workerFunction,
     Object? workerParams,
     bool enableWasmConverter = true,
-    bool priority = false,
+    Priority priority = Priority.low,
   }) {
     return _execute(
       function,
@@ -125,7 +125,7 @@ class IsolateManagerShared {
     String? workerFunction,
     Object? workerParams,
     bool enableWasmConverter = true,
-    bool priority = false,
+    Priority priority = Priority.low,
   }) {
     return _execute(
       function,
@@ -144,7 +144,7 @@ class IsolateManagerShared {
     String? workerFunction,
     Object? workerParams,
     bool enableWasmConverter = true,
-    bool priority = false,
+    Priority priority = Priority.low,
   }) async {
     return platformExecute<R, P>(
       manager: _manager,

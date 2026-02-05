@@ -1,28 +1,39 @@
 import 'dart:collection';
 
 import 'package:isolate_manager/src/models/isolate_queue.dart';
+import 'package:isolate_manager/src/priority.dart';
 
 /// Strategy to control a new (incoming) computation if the maximum number of Queues
 /// is reached.
 ///
 /// Some of strategies:
 ///   - [UnlimitedStrategy] - is default.
-///   - [DropNewestStrategy]
-///   - [DropOldestStrategy]
 ///   - [RejectIncomingStrategy]
 abstract class QueueStrategy<R, P> {
   /// Strategy to control a new (incoming) computation if the maximum number of Queues
   /// is reached. The maximum number is unlimited if [maxCount] <= 0 (by default).
   ///
+  /// Isolates count should be the same as concurrent isolates for best performance
+  ///
   /// Some of strategies:
   ///   - [UnlimitedStrategy] is default.
-  ///   - [DropNewestStrategy]
-  ///   - [DropOldestStrategy]
   ///   - [RejectIncomingStrategy]
-  QueueStrategy({this.maxCount = 0});
+  QueueStrategy({this.maxCount = 0, required int isolatesCount}){
 
-  /// Queue of isolates.
-  final Queue<IsolateQueue<R, P>> queues = Queue();
+    for (var i=0;i<isolatesCount;i++){
+      queues.add({
+        for (final priority in Priority.values)
+        priority: Queue()
+      });
+      isolatesLoad.add(0);
+    }
+  }
+
+  /// Priority Queues for each isolate
+  final List<Map<Priority, Queue<IsolateQueue<R, P>>>> queues = [];
+
+  /// Tasks left per isolate
+  final List<int> isolatesLoad = []; 
 
   /// Max number of queued computations.
   ///
@@ -30,7 +41,7 @@ abstract class QueueStrategy<R, P> {
   final int maxCount;
 
   /// Number of the current queues.
-  int get queuesCount => queues.length;
+  int get queuesCount => isolatesLoad.reduce((a,b) => a+b);
 
   /// Determines if a new computation should be added to the queue when
   /// the maximum count is exceeded.
@@ -41,76 +52,79 @@ abstract class QueueStrategy<R, P> {
   bool continueIfMaxCountExceeded();
 
   /// Add a new computation to the Queue.
-  ///
-  /// If [addToTop] is `true`, the new computation will be added to the top of the
-  /// Queue.
-  void add(IsolateQueue<R, P> queue, {bool addToTop = false}) {
+  void add(IsolateQueue<R, P> queue, {Priority priority = Priority.low, int? onIsolateIdx}) {
     if (maxCount > 0 && queuesCount >= maxCount) {
       if (!continueIfMaxCountExceeded()) return;
     }
-    if (addToTop) {
-      queues.addFirst(queue);
+    if (onIsolateIdx == null){
+      var bestLoad = 0;
+      var bestIdx = 0;
+      for (final (int idx, int load) in isolatesLoad.indexed){
+        if (load < bestLoad){
+          bestLoad = load;
+          bestIdx = idx;
+        }
+      }
+      isolatesLoad[bestIdx] += 1;
+      queues[bestIdx][priority]!.add(queue);
     } else {
-      queues.add(queue);
+      isolatesLoad[onIsolateIdx] += 1;
+      queues[onIsolateIdx][priority]!.add(queue);
     }
   }
 
   /// Check if the Queue is not empty.
-  bool hasNext() {
-    return queues.isNotEmpty;
+  bool hasNext([int? onIsolateIdx]) {
+    if (onIsolateIdx == null){
+      return isolatesLoad.any((load) => load > 0);
+    } else {
+      return isolatesLoad[onIsolateIdx] > 0;
+    }
   }
 
   /// Get the next computation.
-  IsolateQueue<R, P> getNext() {
+  IsolateQueue<R, P> getNext([int? onIsolateIdx]) {
     assert(hasNext(), 'Can only `getNext` when there is a next element');
-    return queues.removeFirst();
+    for (final priority in Priority.sorted) {
+      if (onIsolateIdx == null) {
+        for (final (idx, isolate) in queues.indexed){
+          if (isolate[priority]!.isNotEmpty){
+            isolatesLoad[idx] -= 1; 
+            return isolate[priority]!.removeFirst();
+          }
+        }
+      } else {
+        if (queues[onIsolateIdx][priority]!.isNotEmpty) {
+          isolatesLoad[onIsolateIdx] -= 1;
+          return queues[onIsolateIdx][priority]!.removeFirst();
+        }
+      }
+    }
+    throw Exception('No next element available');
   }
 
   /// Clear all queues.
-  void clear() => queues.clear();
+  void clear() {
+    for (final isolate in queues) {
+      isolate.forEach((_, queue) => queue.clear());
+    }
+  }
 }
 
 /// Unlimited queued computations.
 class UnlimitedStrategy<R, P> extends QueueStrategy<R, P> {
   /// Unlimited queued computations.
-  UnlimitedStrategy();
+  UnlimitedStrategy({required super.isolatesCount});
 
   @override
   bool continueIfMaxCountExceeded() => true;
 }
 
-/// Remove the newest computation if the [maxCount] is exceeded.
-class DropNewestStrategy<R, P> extends QueueStrategy<R, P> {
-  /// Remove the newest computation if the [maxCount] is exceeded.
-  DropNewestStrategy({super.maxCount = 0});
-
-  @override
-  bool continueIfMaxCountExceeded() {
-    // Remove the last computation if the Queue (mean the newest one).
-    queues.removeLast();
-    // It means the current computation should be added to the Queue.
-    return true;
-  }
-}
-
-/// Remove the oldest computation if the [maxCount] is exceeded.
-class DropOldestStrategy<R, P> extends QueueStrategy<R, P> {
-  /// Remove the oldest computation if the [maxCount] is exceeded.
-  DropOldestStrategy({super.maxCount = 0});
-
-  @override
-  bool continueIfMaxCountExceeded() {
-    // Remove the first computation if the Queue (mean the oldest one).
-    queues.removeFirst();
-    // It means the current computation should be added to the Queue.
-    return true;
-  }
-}
 
 /// Discard the new incoming computation if the [maxCount] is exceeded.
 class RejectIncomingStrategy<R, P> extends QueueStrategy<R, P> {
   /// Discard the new incoming computation if the [maxCount] is exceeded.
-  RejectIncomingStrategy({super.maxCount = 0});
+  RejectIncomingStrategy({required super.isolatesCount, super.maxCount = 0});
 
   @override
   bool continueIfMaxCountExceeded() {

@@ -10,7 +10,7 @@ Future<R> platformExecuteImpl<R extends Object?, P extends Object?>({
   required P params,
   required String? workerFunction,
   required Object? workerParams,
-  required bool priority,
+  required Priority priority,
   required bool enableWasmConverter,
 }) async {
   final result = await manager.compute([function, params], priority: priority);

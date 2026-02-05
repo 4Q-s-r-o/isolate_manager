@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:isolate_manager/isolate_manager.dart';
 import 'package:isolate_manager/src/base/isolate_contactor.dart';
@@ -38,8 +39,6 @@ class IsolateManager<R, P> {
   /// Control the Queue strategy via [queueStrategy] with the following basic
   /// strategies:
   ///   - [UnlimitedStrategy] - default.
-  ///   - [DropNewestStrategy]
-  ///   - [DropOldestStrategy]
   ///   - [RejectIncomingStrategy]
   ///
   /// [isDebug] enables debug logs when set to true.
@@ -52,8 +51,10 @@ class IsolateManager<R, P> {
     QueueStrategy<R, P>? queueStrategy,
     this.enableWasmConverter = true,
     this.isDebug = false,
+    void Function(dynamic)? postExecutor,
   }) : isCustomIsolate = false,
-       queueStrategy = queueStrategy ?? UnlimitedStrategy(),
+       _postExecutor = postExecutor,
+       queueStrategy = queueStrategy ?? UnlimitedStrategy(isolatesCount: concurrent),
        _workerName = normalizePath(workerName) {
     IsolateContactor.debugLogPrefix = debugLogPrefix;
   }
@@ -79,8 +80,6 @@ class IsolateManager<R, P> {
   /// Control the Queue strategy via [queueStrategy] with the following basic
   /// strategies:
   ///   - [UnlimitedStrategy] - default.
-  ///   - [DropNewestStrategy]
-  ///   - [DropOldestStrategy]
   ///   - [RejectIncomingStrategy]
   ///
   /// Set [isDebug] to `true` to enable debug logs.
@@ -93,8 +92,10 @@ class IsolateManager<R, P> {
     QueueStrategy<R, P>? queueStrategy,
     this.enableWasmConverter = true,
     this.isDebug = false,
+    void Function(dynamic)? postExecutor,
   }) : isCustomIsolate = true,
-       queueStrategy = queueStrategy ?? UnlimitedStrategy(),
+       _postExecutor = postExecutor,
+       queueStrategy = queueStrategy ?? UnlimitedStrategy(isolatesCount: concurrent),
        _workerName = normalizePath(workerName) {
     // Set the debug log prefix.
     IsolateContactor.debugLogPrefix = debugLogPrefix;
@@ -211,6 +212,7 @@ class IsolateManager<R, P> {
     IsolateConverter<R>? workerConverter,
     bool enableWasmConverter = true,
     bool isDebug = false,
+    void Function(dynamic)? postExecutor,
   }) async {
     final im = IsolateManager<R, P>.create(
       function,
@@ -219,6 +221,7 @@ class IsolateManager<R, P> {
       workerConverter: workerConverter,
       enableWasmConverter: enableWasmConverter,
       isDebug: isDebug,
+      postExecutor: postExecutor,
     );
 
     await im.start();
@@ -282,6 +285,7 @@ class IsolateManager<R, P> {
     IsolateCallback<R>? callback,
     bool enableWasmConverter = true,
     bool isDebug = false,
+    void Function(dynamic)? postExecutor,
   }) async {
     final im = IsolateManager<R, P>.createCustom(
       function,
@@ -290,6 +294,7 @@ class IsolateManager<R, P> {
       workerConverter: workerConverter,
       enableWasmConverter: enableWasmConverter,
       isDebug: isDebug,
+      postExecutor: postExecutor,
     );
 
     await im.start();
@@ -323,8 +328,6 @@ class IsolateManager<R, P> {
   /// Control the Queue strategy via [queueStrategy] with the following basic
   /// strategies:
   ///   - [UnlimitedStrategy] - default.
-  ///   - [DropNewestStrategy]
-  ///   - [DropOldestStrategy]
   ///   - [RejectIncomingStrategy]
   ///
   /// Set [isDebug] to `true` if you want to print the debug log.
@@ -339,6 +342,7 @@ class IsolateManager<R, P> {
     QueueStrategy<Object?, List<dynamic>>? queueStrategy,
     bool enableWasmConverter = true,
     bool isDebug = false,
+    void Function(dynamic)? postExecutor,
   }) => IsolateManagerShared(
     concurrent: concurrent,
     useWorker: useWorker,
@@ -349,6 +353,7 @@ class IsolateManager<R, P> {
     queueStrategy: queueStrategy,
     enableWasmConverter: enableWasmConverter,
     isDebug: isDebug,
+    postExecutor: postExecutor,
   );
 
   /// Debug logs prefix.
@@ -392,6 +397,8 @@ class IsolateManager<R, P> {
     _workerMappings.clear();
   }
 
+  final void Function(dynamic)? _postExecutor;
+
   /// Number of concurrent isolates.
   final int concurrent;
 
@@ -434,8 +441,6 @@ class IsolateManager<R, P> {
   ///
   /// Basic strategies:
   ///   - [UnlimitedStrategy] - default.
-  ///   - [DropNewestStrategy]
-  ///   - [DropOldestStrategy]
   ///   - [RejectIncomingStrategy]
   final QueueStrategy<R, P> queueStrategy;
 
@@ -459,9 +464,12 @@ class IsolateManager<R, P> {
   /// To check if the [start] method is completed or not.
   bool get isStarted => _startedCompleter.isCompleted;
 
-  /// `Map<IsolateContactor instance, isBusy>`.
-  final Map<IsolateContactor<R, P>, bool> _isolates =
-      <IsolateContactor<R, P>, bool>{};
+  final List<IsolateContactor<R, P>> _isolates = [];
+  final List<bool> _isolatesBusy = [];
+
+  /// Returns which isolates are busy
+  UnmodifiableListView<bool> get isolatesBusy =>
+      UnmodifiableListView(_isolatesBusy);
 
   /// Controller for stream.
   final StreamController<R> _streamController = StreamController.broadcast();
@@ -503,59 +511,58 @@ class IsolateManager<R, P> {
 
     if (isCustomIsolate) {
       // Create the custom isolates.
-      await Future.wait(<Future<void>>[
-        for (int i = 0; i < concurrent; i++)
-          IsolateContactor.createCustom<R, P>(
-            isolateFunction as IsolateCustomFunction,
-            workerName: workerName,
-            initialParams: null,
-            converter:
-                (value) => converterHelper(
-                  value,
-                  customConverter: converter,
-                  enableWasmConverter: enableWasmConverter,
-                ),
-            workerConverter:
-                (value) => converterHelper(
-                  value,
-                  customConverter: workerConverter,
-                  enableWasmConverter: enableWasmConverter,
-                ),
-            debugMode: isDebug,
-          ).then(
-            (IsolateContactor<R, P> value) =>
-                _isolates.addAll(<IsolateContactor<R, P>, bool>{value: false}),
-          ),
-      ]);
+      for (var i = 0; i < concurrent; i++) {
+        final value = await IsolateContactor.createCustom<R, P>(
+          isolateFunction as IsolateCustomFunction,
+          workerName: workerName,
+          initialParams: null,
+          converter:
+              (value) => converterHelper(
+                value,
+                customConverter: converter,
+                enableWasmConverter: enableWasmConverter,
+              ),
+          workerConverter:
+              (value) => converterHelper(
+                value,
+                customConverter: workerConverter,
+                enableWasmConverter: enableWasmConverter,
+              ),
+          debugMode: isDebug,
+        );
+        _isolates.add(value);
+        _isolatesBusy.add(false);
+      }
     } else {
       // Create isolates with the internal method.
-      await Future.wait(<Future<void>>[
-        for (int i = 0; i < concurrent; i++)
-          IsolateContactor.createCustom<R, P>(
-            _defaultIsolateFunction<R, P>,
-            initialParams: isolateFunction as IsolateFunction<R, P>,
-            workerName: workerName,
-            converter:
-                (value) => converterHelper(
-                  value,
-                  customConverter: converter,
-                  enableWasmConverter: enableWasmConverter,
-                ),
-            workerConverter:
-                (value) => converterHelper(
-                  value,
-                  customConverter: workerConverter,
-                  enableWasmConverter: enableWasmConverter,
-                ),
-            debugMode: isDebug,
-          ).then((value) => _isolates[value] = false),
-      ]);
+      for (var i = 0; i < concurrent; i++) {
+        final value = await IsolateContactor.createCustom<R, P>(
+          _defaultIsolateFunction<R, P>,
+          initialParams: isolateFunction as IsolateFunction<R, P>,
+          workerName: workerName,
+          converter:
+              (value) => converterHelper(
+                value,
+                customConverter: converter,
+                enableWasmConverter: enableWasmConverter,
+              ),
+          workerConverter:
+              (value) => converterHelper(
+                value,
+                customConverter: workerConverter,
+                enableWasmConverter: enableWasmConverter,
+              ),
+          debugMode: isDebug,
+        );
+        _isolates.add(value);
+        _isolatesBusy.add(false);
+      }
     }
 
-    _streamSubscription = _streamController.stream.listen(
-      (_) => _executeQueue(),
-      onError: (_, _) => _executeQueue(),
-    );
+    _streamSubscription = _streamController.stream.listen((result) {
+      _postExecutor?.call(result);
+      _executeQueue();
+    }, onError: (_, _) => _executeQueue());
 
     _executeQueue();
 
@@ -597,7 +604,7 @@ class IsolateManager<R, P> {
     _startedCompleter = Completer();
     queueStrategy.clear();
     await Future.wait(<Future<void>>[
-      for (final isolate in _isolates.keys) isolate.dispose(),
+      for (final isolate in _isolates) isolate.dispose(),
       _streamSubscription.cancel(),
     ]);
     _isolates.clear();
@@ -692,14 +699,14 @@ class IsolateManager<R, P> {
   Future<R> call(
     P params, {
     IsolateCallback<R>? callback,
-    bool priority = false,
+    Priority priority = Priority.low,
   }) => compute(params, callback: callback, priority: priority);
 
   ///  Similar to the [compute], for who's using IsolateContactor.
   Future<R> sendMessage(
     P params, {
     IsolateCallback<R>? callback,
-    bool priority = false,
+    Priority priority = Priority.low,
   }) => compute(params, callback: callback, priority: priority);
 
   /// Compute isolate manager with [R] is return type.
@@ -737,39 +744,37 @@ class IsolateManager<R, P> {
   Future<R> compute(
     P params, {
     IsolateCallback<R>? callback,
-    bool priority = false,
+    Priority priority = Priority.low,
+    int? onIsolateIdx,
   }) async {
     await start();
 
     final queue = IsolateQueue<R, P>(params, callback);
-    queueStrategy.add(queue, addToTop: priority);
-    _executeQueue();
+    queueStrategy.add(queue, priority: priority, onIsolateIdx: onIsolateIdx);
+    _executeQueue(onIsolateIdx);
 
     return queue.completer.future;
   }
 
   /// Exccute the element in the queues.
-  void _executeQueue() {
+  void _executeQueue([int? requiredIsolateIdx]) {
     printDebug(() => 'Number of queues: ${queueStrategy.queuesCount}');
-    for (final isolate in _isolates.keys) {
+    for (var i = 0; i < _isolates.length; i++) {
       /// Allow calling `compute` before `start`.
-      if (queueStrategy.hasNext() && _isolates[isolate] == false) {
-        final queue = queueStrategy.getNext();
-        _execute(isolate, queue);
+      if (queueStrategy.hasNext(requiredIsolateIdx) && !_isolatesBusy[i]) {
+        final queue = queueStrategy.getNext(requiredIsolateIdx);
+        _execute(i, queue);
       }
     }
   }
 
   /// Send and recieve value.
-  Future<R> _execute(
-    IsolateContactor<R, P> isolate,
-    IsolateQueue<R, P> queue,
-  ) async {
+  Future<R> _execute(int isolateIdx, IsolateQueue<R, P> queue) async {
     // Mark the current isolate as busy.
-    _isolates[isolate] = true;
+    _isolatesBusy[isolateIdx] = true;
 
     StreamSubscription<dynamic>? sub;
-    sub = isolate.onMessage.listen(
+    sub = _isolates[isolateIdx].onMessage.listen(
       (event) async {
         if (await queue.callback(event)) {
           await sub?.cancel();
@@ -779,7 +784,7 @@ class IsolateManager<R, P> {
           queue.completer.complete(event);
 
           // Mark the current isolate as free.
-          _isolates[isolate] = false;
+          _isolatesBusy[isolateIdx] = false;
         }
       },
       onError: (Object error, StackTrace stackTrace) async {
@@ -790,12 +795,12 @@ class IsolateManager<R, P> {
         queue.completer.completeError(error, stackTrace);
 
         // Mark the current isolate as free.
-        _isolates[isolate] = false;
+        _isolatesBusy[isolateIdx] = false;
       },
     );
 
     try {
-      await isolate.sendMessage(queue.params);
+      await _isolates[isolateIdx].sendMessage(queue.params);
       // To catch both Error and Exception
       // ignore: avoid_catches_without_on_clauses
     } catch (_) {
