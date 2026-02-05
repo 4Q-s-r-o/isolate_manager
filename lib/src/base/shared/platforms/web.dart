@@ -15,6 +15,7 @@ Future<R> platformExecuteImpl<R extends Object?, P extends Object?>({
   required Object? workerParams,
   required Priority priority,
   required bool enableWasmConverter,
+  int? onIsolateIdx,
 }) async {
   final isWorker = manager.workerName != '';
   final isDebug = manager.isDebug;
@@ -46,7 +47,7 @@ Future<R> platformExecuteImpl<R extends Object?, P extends Object?>({
     workerFunction,
     finalParams,
     isUseIsolateType,
-  ], priority: priority);
+  ], priority: priority, onIsolateIdx: onIsolateIdx);
 
   // Encode to IsolateType.
   if (isImTypeSubtype<R>()) {

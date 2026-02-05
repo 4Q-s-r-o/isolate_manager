@@ -30,6 +30,7 @@ Future<R> platformExecute<R extends Object?, P extends Object?>({
   required Object? workerParams,
   required Priority priority,
   required bool enableWasmConverter,
+  int? onIsolateIdx,
 }) async {
   return platformExecuteImpl<R, P>(
     manager: manager,
@@ -39,6 +40,7 @@ Future<R> platformExecute<R extends Object?, P extends Object?>({
     workerParams: workerParams,
     priority: priority,
     enableWasmConverter: enableWasmConverter,
+    onIsolateIdx: onIsolateIdx
   );
 }
 

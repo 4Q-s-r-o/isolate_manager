@@ -12,8 +12,9 @@ Future<R> platformExecuteImpl<R extends Object?, P extends Object?>({
   required Object? workerParams,
   required Priority priority,
   required bool enableWasmConverter,
+  int? onIsolateIdx,
 }) async {
-  final result = await manager.compute([function, params], priority: priority);
+  final result = await manager.compute([function, params], priority: priority, onIsolateIdx: onIsolateIdx);
   return converterHelper<R>(result, enableWasmConverter: enableWasmConverter);
 }
 

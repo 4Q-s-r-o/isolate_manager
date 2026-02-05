@@ -102,6 +102,7 @@ class IsolateManagerShared {
     Object? workerParams,
     bool enableWasmConverter = true,
     Priority priority = Priority.low,
+    int? onIsolateIdx,
   }) {
     return _execute(
       function,
@@ -110,6 +111,7 @@ class IsolateManagerShared {
       workerParams: workerParams,
       priority: priority,
       enableWasmConverter: enableWasmConverter,
+      onIsolateIdx: onIsolateIdx
     );
   }
 
@@ -126,6 +128,7 @@ class IsolateManagerShared {
     Object? workerParams,
     bool enableWasmConverter = true,
     Priority priority = Priority.low,
+    int? onIsolateIdx,
   }) {
     return _execute(
       function,
@@ -134,6 +137,7 @@ class IsolateManagerShared {
       workerParams: workerParams,
       priority: priority,
       enableWasmConverter: enableWasmConverter,
+      onIsolateIdx: onIsolateIdx,
     );
   }
 
@@ -145,6 +149,7 @@ class IsolateManagerShared {
     Object? workerParams,
     bool enableWasmConverter = true,
     Priority priority = Priority.low,
+    int? onIsolateIdx,
   }) async {
     return platformExecute<R, P>(
       manager: _manager,
@@ -161,6 +166,7 @@ class IsolateManagerShared {
       workerParams: workerParams,
       priority: priority,
       enableWasmConverter: enableWasmConverter,
+      onIsolateIdx: onIsolateIdx,
     );
   }
 
