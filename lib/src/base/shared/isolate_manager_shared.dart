@@ -46,7 +46,7 @@ class IsolateManagerShared {
     QueueStrategy<Object?, List<dynamic>>? queueStrategy,
     this.enableWasmConverter = true,
     bool isDebug = false,
-    void Function(dynamic)? postExecutor,
+    int? Function(dynamic)? postExecutor,
   }) : _manager = IsolateManager.create(
          internalFunction,
          workerName: useWorker ? join(subPath, kSharedWorkerName) : '',

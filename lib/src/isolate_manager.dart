@@ -51,7 +51,7 @@ class IsolateManager<R, P> {
     QueueStrategy<R, P>? queueStrategy,
     this.enableWasmConverter = true,
     this.isDebug = false,
-    void Function(dynamic)? postExecutor,
+    int? Function(dynamic)? postExecutor,
   }) : isCustomIsolate = false,
        _postExecutor = postExecutor,
        queueStrategy = queueStrategy ?? UnlimitedStrategy(isolatesCount: concurrent),
@@ -92,7 +92,7 @@ class IsolateManager<R, P> {
     QueueStrategy<R, P>? queueStrategy,
     this.enableWasmConverter = true,
     this.isDebug = false,
-    void Function(dynamic)? postExecutor,
+    int? Function(dynamic)? postExecutor,
   }) : isCustomIsolate = true,
        _postExecutor = postExecutor,
        queueStrategy = queueStrategy ?? UnlimitedStrategy(isolatesCount: concurrent),
@@ -212,7 +212,7 @@ class IsolateManager<R, P> {
     IsolateConverter<R>? workerConverter,
     bool enableWasmConverter = true,
     bool isDebug = false,
-    void Function(dynamic)? postExecutor,
+    int? Function(dynamic)? postExecutor,
   }) async {
     final im = IsolateManager<R, P>.create(
       function,
@@ -285,7 +285,7 @@ class IsolateManager<R, P> {
     IsolateCallback<R>? callback,
     bool enableWasmConverter = true,
     bool isDebug = false,
-    void Function(dynamic)? postExecutor,
+    int? Function(dynamic)? postExecutor,
   }) async {
     final im = IsolateManager<R, P>.createCustom(
       function,
@@ -342,7 +342,7 @@ class IsolateManager<R, P> {
     QueueStrategy<Object?, List<dynamic>>? queueStrategy,
     bool enableWasmConverter = true,
     bool isDebug = false,
-    void Function(dynamic)? postExecutor,
+    int? Function(dynamic)? postExecutor,
   }) => IsolateManagerShared(
     concurrent: concurrent,
     useWorker: useWorker,
@@ -397,7 +397,7 @@ class IsolateManager<R, P> {
     _workerMappings.clear();
   }
 
-  final void Function(dynamic)? _postExecutor;
+  final int? Function(dynamic)? _postExecutor;
 
   /// Number of concurrent isolates.
   final int concurrent;
@@ -560,8 +560,13 @@ class IsolateManager<R, P> {
     }
 
     _streamSubscription = _streamController.stream.listen((result) {
-      _postExecutor?.call(result);
-      _executeQueue();
+      int? param; 
+      try {
+        param = _postExecutor?.call(result);
+      } catch (e) {
+        printDebug(() => 'PostExecutor failed');
+      }
+      _executeQueue(param);
     }, onError: (_, _) => _executeQueue());
 
     _executeQueue();
