@@ -764,11 +764,18 @@ class IsolateManager<R, P> {
   /// Exccute the element in the queues.
   void _executeQueue([int? requiredIsolateIdx]) {
     printDebug(() => 'Number of queues: ${queueStrategy.queuesCount}');
-    for (var i = 0; i < _isolates.length; i++) {
-      /// Allow calling `compute` before `start`.
-      if (queueStrategy.hasNext(requiredIsolateIdx) && !_isolatesBusy[i]) {
+    if (requiredIsolateIdx == null){
+      for (var i = 0; i < _isolates.length; i++) {
+        /// Allow calling `compute` before `start`.
+        if (queueStrategy.hasNext(i) && !_isolatesBusy[i]) {
+          final queue = queueStrategy.getNext(i);
+          _execute(i, queue);
+        }
+      }
+    } else {
+      if (queueStrategy.hasNext(requiredIsolateIdx) && !_isolatesBusy[requiredIsolateIdx]) {
         final queue = queueStrategy.getNext(requiredIsolateIdx);
-        _execute(i, queue);
+        _execute(requiredIsolateIdx, queue);
       }
     }
   }
